@@ -55,8 +55,6 @@ db = Users(db_path)
 # QIWI #
 ########
 
-p2p = AioQiwiP2P(qiwi_token)
-
 QiwiNotifier = AioQiwiNotify(qiwi_token)
 
 #######
@@ -169,7 +167,7 @@ async def select_plan_handler(message: Message, *args):
 
     await Forms.payment.set()
 
-    async with p2p:
+    async with AioQiwiP2P(qiwi_token) as p2p:
         _bill = await p2p.bill(
             _bill_id,
             amount=_amount,
