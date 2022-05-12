@@ -191,7 +191,7 @@ async def clear(message: types.Message, *args):
     await message.delete()
 
 
-@QiwiNotifier.handler()
+@QiwiNotifier.handler(lambda b: True)
 async def handle_bills(bill: Bill):
 
     if bill.status == "PAID":
