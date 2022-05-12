@@ -1,0 +1,4 @@
+aiosqlite~=0.17.0
+pyQiwiP2P~=2.0.1
+aiogram~=2.19
+PyYAML~=6.0
