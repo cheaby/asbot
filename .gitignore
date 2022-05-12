@@ -1,0 +1,8 @@
+
+.idea/
+
+config.yml
+
+db/users.db
+
+__pycache__
