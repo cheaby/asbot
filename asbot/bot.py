@@ -191,47 +191,50 @@ async def clear(message: types.Message, *args):
     await message.delete()
 
 
-@QiwiNotifier.handler(lambda b: b.status == "PAID")
+@QiwiNotifier.handler()
 async def handle_bills(bill: Bill):
 
-    _bill_id: str = str(bill.bill_id)
-    log.info("Bot fetched paid bill: %s" % _bill_id)
+    if bill.status == "PAID":
+        _bill_id: str = str(bill.bill_id)
+        log.info("Bot fetched paid bill: %s" % _bill_id)
 
-    _user_id_raw: str = _bill_id.split('_')[0]
+        _user_id_raw: str = _bill_id.split('_')[0]
 
-    # if user paid not through the bot somehow
-    if not _user_id_raw.isdigit():
-        log.error("Got invalid bill id: %s" % bill.bill_id)
-        return
+        # if user paid not through the bot somehow
+        if not _user_id_raw.isdigit():
+            log.error("Got invalid bill id: %s" % bill.bill_id)
+            return
 
-    _user_id = int(_user_id_raw)
+        _user_id = int(_user_id_raw)
 
-    # fetch plan name and plan data
-    _plan_name = bill.comment
-    _plan_data = select_plan_products.get(_plan_name, {})
+        # fetch plan name and plan data
+        _plan_name = bill.comment
+        _plan_data = select_plan_products.get(_plan_name, {})
 
-    _plan_days = _plan_data.get("days", 0)
+        _plan_days = _plan_data.get("days", 0)
 
-    # apply subscription for this person
-    await db.apply_subscription(
-        _user_id,
-        _plan_days,
-        _plan_days == -1)
-    log.info("Applied subscription for %d, expiries after %d" % (_user_id, _plan_days))
+        # apply subscription for this person
+        await db.apply_subscription(
+            _user_id,
+            _plan_days,
+            _plan_days == -1)
+        log.info("Applied subscription for %d, expiries after %d" % (_user_id, _plan_days))
 
-    # create invite link for this person
-    _exp_date = datetime.now() + timedelta(days=1)
-    _invite_link = await bot.create_chat_invite_link(
-        chat_id=channel_pass_id,
-        expire_date=_exp_date,
-        member_limit=1
-    )
+        # create invite link for this person
+        _exp_date = datetime.now() + timedelta(days=1)
+        _invite_link = await bot.create_chat_invite_link(
+            chat_id=channel_pass_id,
+            expire_date=_exp_date,
+            member_limit=1
+        )
 
-    # send invite link and success message
-    await bot.send_message(
-        _user_id,
-        payment_success_text.format(url=_invite_link)
-    )
+        # send invite link and success message
+        await bot.send_message(
+            _user_id,
+            payment_success_text.format(url=_invite_link)
+        )
+    else:
+        log.info("Bot fethced paid: %s" % bill.bill_id)
 
 
 async def create_table():
