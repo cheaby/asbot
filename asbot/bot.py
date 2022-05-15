@@ -18,15 +18,26 @@ from asbot.config import (
     payment_theme,
     payment_currency,
 
+    home_button_text,
+
     start_text,
     start_button_text, info_button_text,
 
-    select_plan_products, select_plan_format, select_plan_text,
+    select_plan_products,
+    select_plan_format,
+    select_plan_text,
 
+    payment_check_text,
+    payment_notyet_text,
+    payment_cancel_text,
     payment_proceed_text,
     payment_success_text,
+    payment_expiried_text,
+    payment_canceled_text,
 
     info_subscriptions_text,
+    info_subscriptions_nosub,
+    info_subscriptions_format,
 
     expiried_text
 )
@@ -39,7 +50,7 @@ from aiogram import (
     Bot,
     Dispatcher,
     types)
-from aiogram.types import CallbackQuery, Message, ContentType
+from aiogram.types import Message, ContentType
 from aiogram.dispatcher import FSMContext
 from aiogram.types.reply_keyboard import KeyboardButton, ReplyKeyboardMarkup
 from aiogram.dispatcher.filters.state import State, StatesGroup
@@ -77,8 +88,17 @@ class Forms(StatesGroup):
     payment = State()
 
 
-@BotDispatcher.message_handler(state="*", commands=['start'])
-async def cmd_start(message: Message, *args):
+@BotDispatcher.message_handler(state="*", commands=["id"])
+async def resolve_channel_id(message: Message, *_args):
+    await message.reply(message.chat.id)
+
+
+@BotDispatcher.message_handler(lambda m: m.text in (home_button_text, "/start"), state="*")
+async def menu(message: Message, state: FSMContext, *args):
+    """Show start menu
+
+    Show start menu, start menu can be invoked in every state by clicking button "home"
+    """
 
     await Forms.start.set()
 
@@ -112,7 +132,7 @@ async def start_button_callback(message: Message, *args):
 
     # values "days", "name", "amount" and "description" must be passed in "select_plan_products", but if not,
     # default values will be used instead and user will get wrong representation of subscription menu.
-    _fmt_list = "\n".join(
+    _fmt_list: str = "\n".join(
         [
             select_plan_format.format(
                 name=k,
@@ -128,7 +148,8 @@ async def start_button_callback(message: Message, *args):
         text=select_plan_text % _fmt_list,
         reply_markup=ReplyKeyboardMarkup(
             keyboard=[
-                [KeyboardButton(text=k) for k in select_plan_products.keys()]
+                [KeyboardButton(text=k) for k in select_plan_products.keys()],
+                [KeyboardButton(text=home_button_text)]
             ],
             resize_keyboard=True
         )
@@ -143,9 +164,25 @@ async def info_button_callback(message: Message, *args):
     """
     await Forms.info.set()
 
+    _text: str
+
+    _user_id = message.from_user.id
+    _user_data = await db.get_sub(_user_id)
+
+    if _user_data:
+        _text = info_subscriptions_text % (info_subscriptions_format.format(expdate=_user_data[1]))
+    else:
+        _text = info_subscriptions_nosub
+
     await bot.send_message(
-        chat_id=message.from_user.id,
-        text=info_subscriptions_text,
+        chat_id=_user_id,
+        text=_text,
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text=home_button_text)]
+            ],
+            resize_keyboard=True
+        )
     )
 
 
@@ -155,24 +192,31 @@ async def info_button_callback(message: Message, *args):
 
 
 @BotDispatcher.message_handler(lambda m: m.text in select_plan_products, state=Forms.plan)
-async def select_plan_handler(message: Message, *args):
+async def select_plan_handler(message: Message, state: FSMContext, *args):
+    """Go to plan select
 
-    _bill_id = "%d_%s" % (message.from_user.id, uuid4())
-
-    _plan_name = message.text
-    _message_user_id = message.from_user.id
-
-    _plan = select_plan_products.get(_plan_name, {})
-    _amount = _plan.get("amount", 0)
-
+    Show menu where user can select their subscription plan
+    """
     await Forms.payment.set()
+
+    _bill: Bill
+
+    _pl_name: str = message.text
+    _user_id: int = message.from_user.id
+    _bill_id: str = f"{_user_id}_{uuid4()}"
+    _plan_data: dict = select_plan_products.get(_pl_name, {})
+    _plan_amount: int = _plan_data.get("amount", 0)
+
+    async with state.proxy() as _dt:
+        _dt["bill_id"] = _bill_id
+        _dt["plan_data"] = _plan_data
 
     async with AioQiwiP2P(qiwi_token) as p2p:
         _bill = await p2p.bill(
             _bill_id,
-            amount=_amount,
+            amount=_plan_amount,
             currency=payment_currency,
-            comment=_plan_name,
+            comment=_pl_name,
             theme_code=payment_theme
         )
 
@@ -180,61 +224,98 @@ async def select_plan_handler(message: Message, *args):
         chat_id=message.from_user.id,
         text=payment_proceed_text.format(
             url=_bill.pay_url,
-            amount=_amount,
-            comment=_message_user_id,
+            amount=_plan_amount,
+            comment=_user_id,
         ),
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text=payment_check_text)],
+                [KeyboardButton(text=payment_cancel_text)]
+            ],
+            resize_keyboard=True
+        )
+    )
+
+
+@BotDispatcher.message_handler(state=Forms.payment, text=payment_cancel_text)
+async def payment_canceled(message: Message, state: FSMContext, *args):
+
+    async with state.proxy() as data:
+        async with AioQiwiP2P(qiwi_token) as p2p:
+            await p2p.reject(data["bill_id"])
+
+    await bot.send_message(
+        chat_id=message.from_user.id,
+        text=payment_canceled_text,
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text=home_button_text)]
+            ],
+            resize_keyboard=True
+        )
+    )
+
+
+@BotDispatcher.message_handler(state=Forms.payment, text=payment_check_text)
+async def payment_check(message: Message, state: FSMContext, *args):
+
+    _message: str
+    _message_rkm = None
+    _user_id: int = message.from_user.id
+
+    async with state.proxy() as data:
+        async with AioQiwiP2P(qiwi_token) as p2p:
+            _bill = await p2p.check(data["bill_id"])
+
+            match _bill.status:
+
+                case "PAID":
+                    _inlink = await bot.create_chat_invite_link(
+                        chat_id=channel_pass_id,
+                        expire_date=datetime.now() + timedelta(days=1),
+                        member_limit=1
+                    )
+                    _message = payment_success_text.format(
+                        url=_inlink.invite_link
+                    )
+                    _message_rkm = ReplyKeyboardMarkup(
+                        keyboard=[
+                            [KeyboardButton(text=home_button_text)]
+                        ],
+                        resize_keyboard=True
+                    )
+                    _plan_days: int = data["plan_data"]["days"]
+                    await db.apply_subscription(
+                        _user_id,
+                        _plan_days,
+                        _plan_days == -1)
+
+                case "WAITING":
+                    _message = payment_notyet_text
+
+                case "EXPIRIED":
+                    _message = payment_expiried_text
+                    _message_rkm = ReplyKeyboardMarkup(
+                        keyboard=[
+                            [KeyboardButton(text=home_button_text)]
+                        ],
+                        resize_keyboard=True
+                    )
+
+    await bot.send_message(
+        chat_id=message.from_user.id,
+        text=_message,
+        reply_markup=_message_rkm
     )
 
 
 @BotDispatcher.message_handler(state='*', content_types=ContentType.ANY)
 async def clear(message: types.Message, *args):
+    """Clear chat
+
+    Clear user messages after they typed something
+    """
     await message.delete()
-
-
-@QiwiNotifier.handler(lambda b: True)
-async def handle_bills(bill: Bill):
-
-    if bill.status == "PAID":
-        _bill_id: str = str(bill.bill_id)
-        log.info("Bot fetched paid bill: %s" % _bill_id)
-
-        _user_id_raw: str = _bill_id.split('_')[0]
-
-        # if user paid not through the bot somehow
-        if not _user_id_raw.isdigit():
-            log.error("Got invalid bill id: %s" % bill.bill_id)
-            return
-
-        _user_id = int(_user_id_raw)
-
-        # fetch plan name and plan data
-        _plan_name = bill.comment
-        _plan_data = select_plan_products.get(_plan_name, {})
-
-        _plan_days = _plan_data.get("days", 0)
-
-        # apply subscription for this person
-        await db.apply_subscription(
-            _user_id,
-            _plan_days,
-            _plan_days == -1)
-        log.info("Applied subscription for %d, expiries after %d" % (_user_id, _plan_days))
-
-        # create invite link for this person
-        _exp_date = datetime.now() + timedelta(days=1)
-        _invite_link = await bot.create_chat_invite_link(
-            chat_id=channel_pass_id,
-            expire_date=_exp_date,
-            member_limit=1
-        )
-
-        # send invite link and success message
-        await bot.send_message(
-            _user_id,
-            payment_success_text.format(url=_invite_link)
-        )
-    else:
-        log.info("Bot fethced paid: %s" % bill.bill_id)
 
 
 async def create_table():
@@ -247,12 +328,12 @@ async def handle_expiried():
         log.info("Looking for expiried subscriptions every hour")
 
         for value in await db.get_expiried():
-            user_id = value[0]
+            _user_id: int = value[0]
 
-            log.info("Notify user %d about expiried sub." % user_id)
-            await db.discard_subscription(user_id)
-            await bot.send_message(user_id, expiried_text)
-            await bot.kick_chat_member(channel_pass_id, user_id)
+            log.info(f"Notify user {_user_id} about expiried sub.")
+            await db.discard_subscription(_user_id)
+            await bot.send_message(_user_id, expiried_text)
+            await bot.kick_chat_member(channel_pass_id, _user_id)
             await sleep(1)
 
         await sleep(3600)
@@ -261,7 +342,6 @@ async def handle_expiried():
 def start_tasks(loop: AbstractEventLoop):
     loop.run_until_complete(create_table())
     loop.create_task(handle_expiried())
-    loop.create_task(QiwiNotifier.a_start(port=8000))
 
 
 __all__ = (

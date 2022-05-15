@@ -13,15 +13,19 @@ CREATE TABLE IF NOT EXISTS users (
 
 
 _APPLY_SUB = """
-INSERT or REPLACE into users (id, exp, f) values (?, ?, ?)
+INSERT OR REPLACE INTO users (id, exp, f) VALUES (?, ?, ?)
 """
 
 _DISC_SUB = """
-DELETE from users where id = ?
+DELETE from users WHERE id = ?
 """
 
 _GET_EXP_SUB = """
-SELECT * FROM users where f != 1 and CURRENT_DATE > exp
+SELECT * FROM users WHERE f != 1 AND CURRENT_DATE > exp
+"""
+
+_GET_INFO_SUB = """
+SELECT * FROM users WHERE id = ?
 """
 
 
@@ -63,8 +67,17 @@ class Users:
     async def get_expiried(self) -> tuple:
         """Get expiried subscriptions
 
-        :return: sequence of rows with values (user_id, subname)
+        :return: sequence of rows with values (user_id, expdate)
         """
         async with connect(self._db) as _db:
             async with _db.execute(_GET_EXP_SUB) as _c:
                 return await _c.fetchall()
+
+    async def get_sub(self, user_id: int) -> tuple:
+        """Get info about subscription
+
+        :return: row with (user_id, expdate) values
+        """
+        async with connect(self._db) as _db:
+            async with _db.execute(_GET_INFO_SUB, (user_id, )) as _c:
+                return await _c.fetchone()
