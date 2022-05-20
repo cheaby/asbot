@@ -25,6 +25,10 @@ home_button_text: str = config.get("home_button_text", "menu")
 
 #
 #
+before_start_text: str = config.get("before_start_text")
+
+#
+#
 start_text: str = config.get("start_text", "No start text")
 start_button_text: str = config.get("start_button_text", "start")
 
@@ -52,6 +56,7 @@ payment_checkagain_text: str = config.get("payment_checkagain_text", "check agai
 info_subscriptions_text: str = config.get("info_subscriptions_text")
 info_subscriptions_nosub: str = config.get("info_subscriptions_nosub")
 info_subscriptions_format: str = config.get("info_subscriptions_format")
+info_subscription_forever: str = config.get("info_subscription_forever")
 
 #
 #

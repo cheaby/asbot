@@ -4,7 +4,7 @@ from uuid import uuid4
 from asyncio import AbstractEventLoop, get_event_loop, sleep
 from datetime import datetime, timedelta
 
-from asbot.db import Users
+from asbot.db import Users, UserModel
 
 from asbot.log import log
 
@@ -19,6 +19,8 @@ from asbot.config import (
     payment_currency,
 
     home_button_text,
+
+    before_start_text,
 
     start_text,
     start_button_text, info_button_text,
@@ -38,6 +40,7 @@ from asbot.config import (
     info_subscriptions_text,
     info_subscriptions_nosub,
     info_subscriptions_format,
+    info_subscription_forever,
 
     expiried_text
 )
@@ -93,7 +96,27 @@ async def resolve_channel_id(message: Message, *_args):
     await message.reply(message.chat.id)
 
 
-@BotDispatcher.message_handler(lambda m: m.text in (home_button_text, "/start"), state="*")
+@BotDispatcher.message_handler(state="*", commands=["start"])
+async def start(message: Message, *args):
+    _user_id: int = message.from_user.id
+
+    await db.register_user(_user_id)
+
+    await bot.send_message(
+        chat_id=_user_id,
+        text=before_start_text,
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[
+                [
+                    KeyboardButton(text=home_button_text)
+                ],
+            ],
+            resize_keyboard=True
+        )
+    )
+
+
+@BotDispatcher.message_handler(state="*", text=home_button_text)
 async def menu(message: Message, state: FSMContext, *args):
     """Show start menu
 
@@ -164,19 +187,32 @@ async def info_button_callback(message: Message, *args):
     """
     await Forms.info.set()
 
-    _text: str
+    _sub: str = info_subscriptions_nosub
+    _spent: int = 0
 
-    _user_id = message.from_user.id
-    _user_data = await db.get_sub(_user_id)
+    _user_id: int = message.from_user.id
+    _user_name: str = message.from_user.username
+    _user_data: UserModel = await db.get_user_data(_user_id)
 
     if _user_data:
-        _text = info_subscriptions_text % (info_subscriptions_format.format(expdate=_user_data[1]))
-    else:
-        _text = info_subscriptions_nosub
+        _is_inf: bool = _user_data.is_infinity
+        _expdate_raw: str = _user_data.expdate
+
+        if _expdate_raw:
+            _d: datetime = datetime.strptime(_expdate_raw, "%Y-%m-%d %H:%M:%S.%f")
+            _sub = info_subscriptions_format.format(
+                expdate=_d.strftime("%d.%m.%Y")
+            ) if not _is_inf else info_subscription_forever
+
+        _spent = _user_data.spent
 
     await bot.send_message(
         chat_id=_user_id,
-        text=_text,
+        text=info_subscriptions_text.format(
+            sub=_sub,
+            spent=_spent,
+            username=_user_name
+        ),
         reply_markup=ReplyKeyboardMarkup(
             keyboard=[
                 [KeyboardButton(text=home_button_text)]
@@ -284,11 +320,15 @@ async def payment_check(message: Message, state: FSMContext, *args):
                         ],
                         resize_keyboard=True
                     )
-                    _plan_days: int = data["plan_data"]["days"]
+                    _plan: dict = data["plan_data"]
+                    _plan_days: int = _plan["days"]
+                    _plan_amount: int = _plan["amount"]
                     await db.apply_subscription(
                         _user_id,
                         _plan_days,
-                        _plan_days == -1)
+                        _plan_days == -1,
+                        _plan_amount
+                    )
 
                 case "WAITING":
                     _message = payment_notyet_text

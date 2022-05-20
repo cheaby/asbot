@@ -1,19 +1,24 @@
 
-from aiosqlite import connect
-
 from datetime import datetime, timedelta
+from aiosqlite import connect
+from dataclasses import dataclass
 
 
 _CREATE_TABLE = """
 CREATE TABLE IF NOT EXISTS users (
     id integer PRIMARY key,
     exp DATETIME,
-    f BOOL)
+    f BOOL,
+    spent INTEGER DEFAULT 0)
 """
 
 
+_REGISTER_USER = """
+INSERT OR IGNORE INTO users (id) VALUES (?)
+"""
+
 _APPLY_SUB = """
-INSERT OR REPLACE INTO users (id, exp, f) VALUES (?, ?, ?)
+UPDATE users SET exp = ?, f = ?, spent = spent + ? WHERE id = ?
 """
 
 _DISC_SUB = """
@@ -28,6 +33,18 @@ _GET_INFO_SUB = """
 SELECT * FROM users WHERE id = ?
 """
 
+_GET_SPENT = """
+SELECT * FROM users WHERE id = ?
+"""
+
+
+@dataclass
+class UserModel:
+    user_id: int
+    expdate: str
+    is_infinity: bool
+    spent: int
+
 
 class Users:
 
@@ -39,7 +56,12 @@ class Users:
             await _db.execute(_CREATE_TABLE)
             await _db.commit()
 
-    async def apply_subscription(self, user_id: int, days: int, is_infinity: bool) -> None:
+    async def register_user(self, user_id: int):
+        async with connect(self._db) as _db:
+            await _db.execute(_REGISTER_USER, (user_id, ))
+            await _db.commit()
+
+    async def apply_subscription(self, user_id: int, days: int, is_infinity: bool, amount: int) -> None:
         """Apply subscription.
 
         Apply subscription, if user has no subscription, but
@@ -48,11 +70,12 @@ class Users:
         :param int user_id: Unique ID of user
         :param int days: lifetime of the subscription
         :param int is_infinity: applied for infinity subscription, it will never expire
+        :param int amount: cost of the subscription
         """
         _exp_date = datetime.now() + timedelta(days=days)
 
         async with connect(self._db) as _db:
-            await _db.execute(_APPLY_SUB, (user_id, _exp_date, is_infinity))
+            await _db.execute(_APPLY_SUB, (_exp_date, is_infinity, amount, user_id))
             await _db.commit()
 
     async def discard_subscription(self, user_id: int) -> None:
@@ -73,11 +96,11 @@ class Users:
             async with _db.execute(_GET_EXP_SUB) as _c:
                 return await _c.fetchall()
 
-    async def get_sub(self, user_id: int) -> tuple:
+    async def get_user_data(self, user_id: int) -> UserModel:
         """Get info about subscription
 
-        :return: row with (user_id, expdate) values
+        :return: row with (user_id, expdate, f, spent) values
         """
         async with connect(self._db) as _db:
             async with _db.execute(_GET_INFO_SUB, (user_id, )) as _c:
-                return await _c.fetchone()
+                return UserModel(*await _c.fetchone())
