@@ -303,44 +303,42 @@ async def payment_check(message: Message, state: FSMContext, *args):
         async with AioQiwiP2P(qiwi_token) as p2p:
             _bill = await p2p.check(data["bill_id"])
 
-            match _bill.status:
+            if _bill.status == "PAID":
+                _inlink = await bot.create_chat_invite_link(
+                    chat_id=channel_pass_id,
+                    expire_date=datetime.now() + timedelta(days=1),
+                    member_limit=1
+                )
+                _message = payment_success_text.format(
+                    url=_inlink.invite_link
+                )
+                _message_rkm = ReplyKeyboardMarkup(
+                    keyboard=[
+                        [KeyboardButton(text=home_button_text)]
+                    ],
+                    resize_keyboard=True
+                )
+                _plan: dict = data["plan_data"]
+                _plan_days: int = _plan["days"]
+                _plan_amount: int = _plan["amount"]
+                await db.apply_subscription(
+                    _user_id,
+                    _plan_days,
+                    _plan_days == -1,
+                    _plan_amount
+                )
 
-                case "PAID":
-                    _inlink = await bot.create_chat_invite_link(
-                        chat_id=channel_pass_id,
-                        expire_date=datetime.now() + timedelta(days=1),
-                        member_limit=1
-                    )
-                    _message = payment_success_text.format(
-                        url=_inlink.invite_link
-                    )
-                    _message_rkm = ReplyKeyboardMarkup(
-                        keyboard=[
-                            [KeyboardButton(text=home_button_text)]
-                        ],
-                        resize_keyboard=True
-                    )
-                    _plan: dict = data["plan_data"]
-                    _plan_days: int = _plan["days"]
-                    _plan_amount: int = _plan["amount"]
-                    await db.apply_subscription(
-                        _user_id,
-                        _plan_days,
-                        _plan_days == -1,
-                        _plan_amount
-                    )
+            elif _bill.status == "WAITING":
+                _message = payment_notyet_text
 
-                case "WAITING":
-                    _message = payment_notyet_text
-
-                case "EXPIRIED":
-                    _message = payment_expiried_text
-                    _message_rkm = ReplyKeyboardMarkup(
-                        keyboard=[
-                            [KeyboardButton(text=home_button_text)]
-                        ],
-                        resize_keyboard=True
-                    )
+            elif _bill.status == "EXPIRIED":
+                _message = payment_expiried_text
+                _message_rkm = ReplyKeyboardMarkup(
+                    keyboard=[
+                        [KeyboardButton(text=home_button_text)]
+                    ],
+                    resize_keyboard=True
+                )
 
     await bot.send_message(
         chat_id=message.from_user.id,
