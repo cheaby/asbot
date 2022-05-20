@@ -1,7 +1,6 @@
 
 from datetime import datetime, timedelta
 from aiosqlite import connect
-from dataclasses import dataclass
 
 
 _CREATE_TABLE = """
@@ -38,12 +37,17 @@ SELECT * FROM users WHERE id = ?
 """
 
 
-@dataclass
 class UserModel:
     user_id: int
     expdate: str
     is_infinity: bool
     spent: int
+
+    def __init__(self, data):
+        self.user_id = data[0]
+        self.expdate = data[1]
+        self.is_infinity = data[2]
+        self.spent = data[3]
 
 
 class Users:
