@@ -107,4 +107,4 @@ class Users:
         """
         async with connect(self._db) as _db:
             async with _db.execute(_GET_INFO_SUB, (user_id, )) as _c:
-                return UserModel(*await _c.fetchone())
+                return UserModel(await _c.fetchone())
